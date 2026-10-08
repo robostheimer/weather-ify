@@ -1,0 +1,22 @@
+<fieldset class="flex gap-2">
+  <legend>Location</legend>
+  <input [formControl]="locationControl"  class="border-2 border-gray-300 rounded-md p-2" >
+  <legend>Genre</legend>
+  <select 
+    class="border-2 border-gray-300 rounded-md p-2" 
+    #genreSelect (change) = "selectGenre(genreSelect.value)">
+    <option value="all" [selected]="selectedGenre?.id === undefined">All genres</option>
+    @for(genre of genres; track genre?.id) {
+      <option value={{genre?.id}} [selected]="genre?.id === selectedGenre?.id"> {{ genre?.displayName }}</option>
+      }
+  </select>
+  <legend>Mood</legend>
+  <select 
+    class="border-2 border-gray-300 rounded-md p-2"
+    #moodSelect (change)="selectMood(moodSelect.value)">
+    @for(mood of this.moods(); track mood.energy) {
+      <option value={{mood?.mood}} [selected]="mood?.mood === selectedMood?.mood">{{ mood?.mood }}</option>
+    }
+  </select>
+  <button class="bg-green-500 text-white px-4 py-2 rounded-md disabled:opacity-50" (click)="refreshPlaylist()" [disabled]=" !selectedMood?.mood ">Refresh Playlist</button>
+</fieldset>

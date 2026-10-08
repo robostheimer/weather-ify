@@ -1,0 +1,14 @@
+@if (showPlayer() && embedUrl(); as url) {
+  <iframe
+    title="Spotify embed player"
+    [src]="url"
+    width="100%"
+    height="352"
+    style="border-radius: 12px"
+    allowfullscreen
+    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+    loading="lazy"
+  ></iframe>
+} @else {
+  <button class="bg-blue-500 text-white px-4 py-2 rounded-md" type="button" (click)="savePlaylist()">Save Playlist</button>
+}

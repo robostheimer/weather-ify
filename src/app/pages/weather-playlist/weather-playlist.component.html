@@ -1,0 +1,66 @@
+<header class="flex justify-between items-center">
+  <h1 class="text-2xl font-bold text-green-700">Weather-ify</h1>
+  @if (isLoggedIn) {
+  <div class="flex flex-col items-center gap-2">
+    <span>{{this.user()?.display_name ?? 'Logged In to Spotify'}}</span>
+    <button class="bg-green-500 text-white px-4 py-2 rounded-md" (click)="logout()">Logout</button>
+  </div>
+  } @else {
+  <button (click)="login()" class="bg-green-500 text-white px-4 py-2 rounded-md">Login with Spotify</button>
+  }
+</header>
+<main>
+  <app-location-input
+    (onGenreChange)="setGenre($event)"
+    (onLocationChange)="changeLocation($event)"
+    (onMoodChange)="setMood($event)"
+    (onRefreshPlaylist)="refreshPlaylist()"
+    [selectedGenre]="genre()"
+    [selectedMood]="mood()"
+    [genres]="genres"
+    [loading]="loading()"
+  />
+
+  @if (loading()) {
+    <p>Loading...</p>
+  } @else {
+    <p class="mb-4 mt-4">
+      @if (temperature()) {
+        It's {{ conditions() }} and {{ temperature() }}°{{ unit() }} in {{ location() }} and you're in the mood for {{ mood()?.mood }} tracks
+      } @else if (location() && mood()) {
+        You're in {{ location() }}. What are you in the mood for
+      } @else if (location()) {
+        You're in {{ location() }}. What are you in the mood for
+      } @else {
+        Add a location and a genre to get started
+      }
+    </p>
+    @for (track of tracks(); track track.id) {
+      <div class="mb-4">
+        <p>
+          <a
+            href="{{ track.external_urls.spotify }}"
+            target="_blank"
+            class="text-blue-500 hover:text-blue-700"
+            >{{ track.name }}</a
+          >
+        </p>
+        <p>
+          @for (artist of track.artists; track artist.id) {
+            {{ artist.name }}
+          }
+        </p>
+      </div>
+    }
+    @if (tracks().length > 0) {
+      <app-save-playlist
+        [mood]="mood()?.mood"
+        [tracks]="tracks()"
+        [location]="location()"
+        [conditions]="conditions()"
+      />
+    }
+  }
+</main>
+<!-- for testing remove -->
+<!-- <button (click)="getMoodRecommendations('happy', genre())">Get Happy Mood Recommendations</button>  -->

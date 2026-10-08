@@ -1,0 +1,249 @@
+# Angular interview notes (from Weather-ify)
+
+Cheat sheet tuned for an Ember/Glimmer background and the syntax traps we hit building this app.
+
+---
+
+## Mental model
+
+| Ember | Angular |
+| --- | --- |
+| Class + `.hbs` | Class + `.html` + `@Component` |
+| `@tracked` | `signal()` — read with `()`, write with `.set()` |
+| Autotracked getter / old `computed()` | `computed(() => …)` |
+| `@service` | `inject(SomeService)` + `@Injectable` with `providedIn: 'root'` |
+| `outlet` helper + router | `<router-outlet />` + `provideRouter(routes)` |
+| Args + actions (DDAU) | `input()` / `output()` + `.emit()` |
+| Nested `await` | `pipe(switchMap(...))` then **one** `subscribe` |
+
+Angular today = **standalone components** (no NgModules required). Each component lists what its template needs in `imports: [...]`.
+
+---
+
+## Components & standalone `imports`
+
+- Generating a component does **not** mount it. Parent must:
+  1. Import the child component class
+  2. Add it to `@Component` `imports: [ChildComponent]`
+  3. Use its `selector` in the template (`<app-child />`)
+- Missing that → **NG8001: not a known element** (we hit this with `app-save-playlist`).
+
+---
+
+## Signals (sync reactivity)
+
+```ts
+location = signal('');
+location.set('Seattle');   // write
+location();                // read → 'Seattle'
+```
+
+**Why `.set()` not `=`?**  
+`location` is the **box**. `=` replaces the box (orphans `computed` / `toObservable` watchers). `.set()` updates the value inside the same box.
+
+```ts
+// BAD — new signal, old watchers broken
+this.genre = signal(selected);
+
+// GOOD
+this.genre.set(selected);
+```
+
+`computed(() => …)` = pure derived value. **No HTTP, no `.subscribe`, no side effects** inside.
+
+---
+
+## Templates — syntax traps
+
+| Do | Don’t |
+| --- | --- |
+| `(click)="save(genre())"` | Nesting mustache interpolation inside `(click)` |
+| `[genres]="genres"` | `genres="genres"` (string!) |
+| `[selectedGenre]="genre()"` if signal | Forget `()` on signals |
+| `@if` / `@else` blocks | Assume Ember’s `this.` is required |
+| `@for (item of items(); track item.id)` | Omit `track` |
+
+- Mustache `{{ }}` = text interpolation only. Inside `(click)` / `[prop]` you’re **already** in an expression — no nested mustaches.
+- No TypeScript casts in templates (`as string` is invalid there).
+- Prefer `@if` / `@for` (modern) over `*ngIf` / `*ngFor` (still good to recognize).
+
+### DDAU (data down, actions up)
+
+```ts
+// child
+genres = input<Genre[]>([]);
+locationChange = output<string>();
+this.locationChange.emit(value);
+```
+
+```html
+<!-- parent -->
+<app-child [genres]="genres" (locationChange)="onLocationChange($event)" />
+```
+
+`$event` = whatever was passed to `.emit(...)`.
+
+Function `@Input`s (Ember-style callbacks) also work; `output()` + `emit` is the idiomatic Angular event form.
+
+`FormControl` can stay on a “semi-dumb” child for the actual `<input>`; parent still owns app state (weather, mood, Spotify) via outputs.
+
+---
+
+## Dependency injection
+
+```ts
+private weather = inject(WeatherService);
+
+@Injectable({ providedIn: 'root' })  // app-wide singleton
+export class WeatherService { /* ... */ }
+```
+
+Same idea as Ember services. Prefer services for HTTP/domain; components for UI + wiring.
+
+---
+
+## HTTP & RxJS (async)
+
+`HttpClient` methods return **Observables** (lazy — nothing runs until `subscribe`, `async` pipe, or `toSignal`).
+
+```ts
+this.http.get<T>(url).pipe(
+  map(r => r.items),           // sync reshape
+  switchMap(x => otherHttp(x)), // dependent async call / cancel prior
+  catchError(err => of([])),   // recover; must return an Observable
+  takeUntilDestroyed(),        // unsubscribe when component dies
+).subscribe(value => this.tracks.set(value));
+```
+
+### Operators you’ll be asked about
+
+| Operator | Use |
+| --- | --- |
+| `pipe(...)` | Chain operators (comma-separated steps) |
+| `map` | Transform payload (`SearchResponse` → `Track[]`) |
+| `switchMap` | Map to a **new** Observable; cancel previous inner (typeahead, A→B HTTP) |
+| `catchError` | Like `Promise.catch`; return `of(fallback)` or `throwError` |
+| `of(x)` | Immediate Observable of `x` (≈ `Promise.resolve(x)`) |
+| `debounceTime(ms)` | Wait for pause in emissions |
+| `takeUntilDestroyed()` | Auto-unsubscribe on destroy |
+
+**`map` vs `switchMap` trap:**  
+`switchMap(r => r.tracks.items)` on an **array** emits each item one-by-one. Want the array? Use `map(r => r.tracks.items)`.
+
+**Nested `subscribe`:** works but loses shared cancel/error/cleanup. Prefer one pipeline + one `subscribe`.
+
+### Signals ↔ RxJS bridge
+
+```ts
+toObservable(this.location).pipe(
+  debounceTime(500),
+  switchMap(loc => this.weather.get(loc)),
+  takeUntilDestroyed(),
+).subscribe(w => this.weatherResponse.set(w));
+```
+
+Signals = current state. Observables = time, debounce, cancel, HTTP.  
+(You can also debounce with `setTimeout`/`clearTimeout` — clearer for some; say so deliberately in interviews.)
+
+**Future (know the names):** experimental `resource()` / `httpResource()` (Angular 19.2+) — async results as signals. Still evolving; classic `HttpClient` + RxJS is still the interview baseline.
+
+---
+
+## Routing
+
+```ts
+export const routes: Routes = [
+  { path: '', redirectTo: '/weather-playlist', pathMatch: 'full' },
+  { path: 'weather-playlist', component: WeatherPlaylistComponent },
+  { path: 'callback', component: SpotifyCallbackComponent },
+];
+```
+
+```html
+<a routerLink="/weather-playlist" routerLinkActive="active"
+   [routerLinkActiveOptions]="{ exact: true }">…</a>
+<router-outlet />
+```
+
+Import `RouterLink`, `RouterLinkActive`, `RouterOutlet` in the shell component’s `imports`.
+
+---
+
+## Lifecycle
+
+- Framework calls **`ngOnInit()`** by name.
+- `implements OnInit` is a TypeScript interface only — renaming the method to `OnInit()` means it **never runs**.
+
+---
+
+## Reactive forms
+
+```ts
+locationControl = new FormControl('', { nonNullable: true });
+// template: <input [formControl]="locationControl" />
+// need ReactiveFormsModule in imports
+locationControl.valueChanges.subscribe(...)  // Observable of keystrokes
+```
+
+---
+
+## Auth (SPA) — PKCE highlight
+
+- Public SPAs use **Authorization Code + PKCE** (no client secret in the bundle).
+- `code_challenge` = **Base64URL(SHA-256(verifier))**, not hex.
+- Redirect URI must match Dashboard **exactly**; local Spotify allows `http://127.0.0.1:PORT/...` (not `localhost`).
+- Store `access_token`, `expires_at`, `refresh_token`, and `scope`; refresh instead of polling logout.
+- After changing scopes → clear tokens + re-consent (old token keeps old scopes).
+
+### Spotify API gotchas we hit
+
+- Prefer `POST /v1/me/playlists` over `/v1/users/{id}/playlists`.
+- Add tracks: `POST /v1/playlists/{id}/items` (**`/tracks` removed / 403** for many apps after Feb 2026 API changes).
+- Track payloads need `spotify:track:{id}` URIs.
+- 403 with body `"Forbidden"` ≠ CORS if status is 403 from Spotify; CORS usually looks like a browser blocked response / status 0.
+
+---
+
+## iframes
+
+Dynamic `[src]` on `<iframe>` is sanitized. Use:
+
+```ts
+sanitizer.bypassSecurityTrustResourceUrl(url)
+```
+
+Only for trusted URLs. Read signals in the URL with `playlistId()`.
+
+---
+
+## Testing (recognize)
+
+- Specs: `*.spec.ts`, `TestBed.inject(Service)`, Jasmine/Karma (or Vitest depending on setup).
+- Mock HTTP with testing modules when you get there.
+
+---
+
+## Strong interview talking points
+
+1. **Standalone components** + per-component `imports` (tree-shakeable, explicit).
+2. **Signals for sync state**; **RxJS for async composition** (debounce, cancel, chain).
+3. **`computed` must stay pure**; side effects belong in `subscribe`, `effect`, or user actions.
+4. **DDAU** with `input`/`output` (or Ember-like function inputs — know both).
+5. **`switchMap` = restartable dependent async** (like ember-concurrency restartable).
+6. **DI** with `inject()` / `providedIn: 'root'`.
+7. Tradeoff honesty: signals + `setTimeout` debounce is valid; RxJS is idiomatic for streams — pick deliberately.
+
+---
+
+## Quick “why is it broken?” checklist
+
+1. Child used in template but missing from parent `imports`?
+2. Signal read without `()` in template / class?
+3. Used `=` on a signal instead of `.set()`?
+4. Put mustache `{{ }}` inside `(click)` / `[prop]`?
+5. `map` vs `switchMap` on an array?
+6. Side effect inside `computed`?
+7. Subscribed? (Observables are lazy.)
+8. `takeUntilDestroyed` missing on long-lived constructor subscriptions?
+9. Lifecycle method actually named `ngOnInit`?
+10. Spotify: scopes on **token**, redirect URI exact, `/items` not `/tracks`?
